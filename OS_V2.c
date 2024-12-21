@@ -99,6 +99,49 @@ void redirect_input(char *command) {
         exit(1);
     }
 }
+// 5) Çıkış Yönlendirme: Komutun çıktısını bir dosyaya yazdıran işlev.
+// $ ls>output.txt => Bu komut, ls komutunun çıktısını output.txt adlı bir dosyaya yazdırır. Mevcut dizindeki tüm dosya ve klasörlerin listesi output.txt'ye kaydedilecektir.
+// $ > cat output.txt => output.txt dosyasını kontrol etmek için program içinde cat komutunu kullanabilirsiniz:
+
+void redirect_output(char *command) {
+    char *cmd = strtok(command, ">");
+    char *output_file = strtok(NULL, "\n");
+
+    if (!output_file) {
+        printf("Çıkış dosyası belirtilmedi.\n");
+        return;
+    }
+
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        int fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd == -1) {
+            perror("Dosya açılamadı");
+            exit(1);
+        }
+        dup2(fd, STDOUT_FILENO);
+        close(fd);
+
+        char *args[256];
+        int i = 0;
+        char *token = strtok(cmd, " ");
+        while (token != NULL) {
+            args[i++] = token;
+            token = strtok(NULL, " ");
+        }
+        args[i] = NULL;
+
+        execvp(args[0], args);
+        perror("exec failed");
+        exit(1);
+    } else if (pid > 0) {
+        wait(NULL);
+    } else {
+        perror("fork failed");
+        exit(1);
+    }
+}
 
 
 
