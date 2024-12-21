@@ -200,6 +200,76 @@ void background_process(char *command) {
     }
 }
 
+// 7) Pipe İşlemi: İki komut arasında veri akışını sağlayan işlev.
+// $ ls | grep txt
+// $ ls | grep c
+
+void pipe_commands(char *command) {
+    char *cmds[256];
+    int num_cmds = 0;
+
+    // Komutları '|' sembolüne göre ayrıştır
+    char *token = strtok(command, "|");
+    while (token != NULL) {
+        cmds[num_cmds++] = token;
+        token = strtok(NULL, "|");
+    }
+
+    int pipefds[2 * (num_cmds - 1)];
+    for (int i = 0; i < num_cmds - 1; i++) {
+        if (pipe(pipefds + 2 * i) == -1) {
+            perror("pipe failed");
+            exit(1);
+        }
+    }
+
+    for (int i = 0; i < num_cmds; i++) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            // İlk süreç değilse giriş için pipe bağla
+            if (i > 0) {
+                dup2(pipefds[(i - 1) * 2], STDIN_FILENO);
+            }
+            // Son süreç değilse çıkış için pipe bağla
+            if (i < num_cmds - 1) {
+                dup2(pipefds[i * 2 + 1], STDOUT_FILENO);
+            }
+
+            // Tüm pipe'ları kapat
+            for (int j = 0; j < 2 * (num_cmds - 1); j++) {
+                close(pipefds[j]);
+            }
+
+            // Komut argümanlarını ayrıştır ve çalıştır
+            char *args[256];
+            int j = 0;
+            char *arg_token = strtok(cmds[i], " \n");
+            while (arg_token != NULL) {
+                args[j++] = arg_token;
+                arg_token = strtok(NULL, " \n");
+            }
+            args[j] = NULL;
+
+            execvp(args[0], args);
+            perror("exec failed");
+            exit(1);
+        } else if (pid < 0) {
+            perror("fork failed");
+            exit(1);
+        }
+    }
+
+    // Tüm pipe'ları kapat
+    for (int i = 0; i < 2 * (num_cmds - 1); i++) {
+        close(pipefds[i]);
+    }
+
+    // Tüm çocuk süreçlerin bitmesini bekle
+    for (int i = 0; i < num_cmds; i++) {
+        wait(NULL);
+    }
+}
+
 
 // Ana program döngüsü: Kullanıcıdan komutları alıp ilgili işlevlere yönlendiren döngü.
 int main() {
@@ -216,7 +286,7 @@ int main() {
         if (strncmp(command, "quit", 4) == 0) {
             quit(bg_pid);
         } else if (strchr(command, '&')) {
-            background_process(command, &bg_pid);
+            background_process(command);
         } else if (strchr(command, '<')) {
             redirect_input(command);
         } else if (strchr(command, '>')) {
