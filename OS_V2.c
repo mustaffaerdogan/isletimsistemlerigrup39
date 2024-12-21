@@ -143,6 +143,62 @@ void redirect_output(char *command) {
     }
 }
 
+// 6) Arka Plan İşlemleri: Komutları arka planda çalıştıran işlev. Bu özellik, bir komutu arka planda çalıştırmak için kullanılır. Arka planda çalışan komutlar, terminaldeki diğer işlemleri engellemeden çalışmaya devam eder. Bu işlev, komutların sonuna & ekleyerek arka planda çalıştırılmasını sağlar.
+// SIGCHLD işleyicisi olarak kullanılacak fonksiyon
+void child_handler(int signo) {
+    int status;
+    pid_t completed_pid;
+
+    // Tamamlanan arka plan işlemlerini kontrol et
+    while ((completed_pid = waitpid(-1, &status, WNOHANG)) > 0) {
+        printf("[PID: %d] retval: %d\n", completed_pid, WEXITSTATUS(status));
+        fflush(stdout);
+    }
+}
+
+void background_process(char *command) {
+    // Komutun sonundaki '&' işaretini kaldır
+    char *background_flag = strchr(command, '&');
+    if (background_flag) {
+        *background_flag = '\0';  // '&' işaretini kaldır
+        // Komutun sonundaki gereksiz boşlukları temizle
+        char *end = background_flag - 1;
+        while (end > command && isspace((unsigned char)*end)) {
+            *end = '\0';
+            end--;
+        }
+    }
+
+    pid_t pid = fork();
+
+    if (pid == 0) {  // Alt süreç
+        char *args[256];
+        int i = 0;
+        char *token = strtok(command, " \n");
+        while (token != NULL) {
+            args[i++] = token;
+            token = strtok(NULL, " \n");
+        }
+        args[i] = NULL;
+
+        execvp(args[0], args);  // Komutu çalıştır
+        perror("exec failed");
+        exit(1);
+    } else if (pid > 0) {  // Ana süreç
+        printf("Arka planda çalışan PID: %d\n", pid);
+        fflush(stdout);
+
+        // SIGCHLD sinyali için işleyici ayarla
+        struct sigaction sa;
+        sa.sa_handler = child_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+        sigaction(SIGCHLD, &sa, NULL);
+    } else {
+        perror("fork failed");
+        exit(1);
+    }
+}
 
 
 // Ana program döngüsü: Kullanıcıdan komutları alıp ilgili işlevlere yönlendiren döngü.
