@@ -2,9 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <ctype.h>
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <bits/sigaction.h>
+#include <asm-generic/signal-defs.h>
 
 // 1) Prompt: Kullanıcıdan komut girişi bekleyen işlev.
 void prompt() {
@@ -14,12 +18,18 @@ void prompt() {
 
 // 2) Quit: Programdan çıkış yaparken arka plan işlemlerini bekleyen işlev.
 // Terminale quit girildiğinde çıkılır
-void quit(int background_pid) {
-    if (background_pid != -1) {
-        waitpid(background_pid, NULL, 0);  // Arka plan işlemlerini bekle
+void quit() {
+    pid_t pid;
+    int status;
+
+    // Tüm arka plan işlemlerini bekle
+    while ((pid = waitpid(-1, &status, 0)) > 0) {
+        printf("[PID: %d] retval: %d\n", pid, WEXITSTATUS(status));
     }
+
     exit(0);  // Programdan çık
 }
+
 
 // 3) Tekli Komutlar: Tek bir komut çalıştıran işlev (örn. ls, pwd).
 // Dosya ve dizin listesi almak için: $ ls
@@ -48,6 +58,48 @@ void execute_command(char *command) {
         exit(1);
     }
 }
+
+// 4) Giriş Yönlendirme: Komutun girişini bir dosyadan okuyan işlev.
+void redirect_input(char *command) {
+    char *cmd = strtok(command, "<");
+    char *input_file = strtok(NULL, "\n");
+
+    if (!input_file) {
+        printf("Giriş dosyası bulunamadı.\n");
+        return;
+    }
+
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        int fd = open(input_file, O_RDONLY);
+        if (fd == -1) {
+            printf("Giriş dosyası bulunamadı.\n");
+            exit(1);
+        }
+        dup2(fd, STDIN_FILENO);
+        close(fd);
+
+        char *args[256];
+        int i = 0;
+        char *token = strtok(cmd, " ");
+        while (token != NULL) {
+            args[i++] = token;
+            token = strtok(NULL, " ");
+        }
+        args[i] = NULL;
+
+        execvp(args[0], args);
+        perror("exec failed");
+        exit(1);
+    } else if (pid > 0) {
+        wait(NULL);
+    } else {
+        perror("fork failed");
+        exit(1);
+    }
+}
+
 
 
 // Ana program döngüsü: Kullanıcıdan komutları alıp ilgili işlevlere yönlendiren döngü.
